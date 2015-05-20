@@ -28,7 +28,7 @@ module ActiveMerchant #:nodoc:
       def purchase(amount, credit_card, options={})
         request_body = soap_request do |xml|
           process_payment(xml) do |payment_xml|
-            add_purchase(payment_xml, amount, credit_card)
+            add_purchase(payment_xml, amount, credit_card, options)
           end
         end
         commit(request_body)
@@ -37,34 +37,34 @@ module ActiveMerchant #:nodoc:
       def authorize(amount, credit_card, options={})
         request_body = soap_request do |xml|
           process_payment(xml) do |payment_xml|
-            add_authorize(payment_xml, amount, credit_card)
+            add_authorize(payment_xml, amount, credit_card, options)
           end
         end
         commit(request_body)
       end
 
-      def capture(amount, transaction_number)
+      def capture(amount, authorization, options={})
         request_body = soap_request do |xml|
           process_payment(xml) do |payment_xml|
-            add_capture(payment_xml, amount, transaction_number)
+            add_capture(payment_xml, amount, authorization, options)
           end
         end
         commit(request_body)
       end
 
-      def refund(amount, transaction_number)
+      def refund(amount, authorization, options={})
         request_body = soap_request do |xml|
           process_payment(xml) do |payment_xml|
-            add_refund(payment_xml, amount, transaction_number)
+            add_refund(payment_xml, amount, authorization, options)
           end
         end
         commit(request_body)
       end
 
-      def void(amount, transaction_number, options={})
+      def void(amount, authorization, options={})
         request_body = soap_request do |xml|
           process_payment(xml) do |payment_xml|
-            add_void(payment_xml, amount, transaction_number)
+            add_void(payment_xml, amount, authorization, options)
           end
         end
         commit(request_body)
@@ -134,35 +134,35 @@ module ActiveMerchant #:nodoc:
         xml.send('merchantNumber', @options[:merchant_number])
       end
 
-      def add_purchase(xml, amount, credit_card)
-        payment_xml(xml, 'PAYMENT', amount)
+      def add_purchase(xml, amount, credit_card, options)
+        payment_xml(xml, 'PAYMENT', amount, options)
         credit_card_xml(xml, credit_card)
       end
 
-      def add_authorize(xml, amount, credit_card)
-        payment_xml(xml, 'PREAUTH', amount)
+      def add_authorize(xml, amount, credit_card, options)
+        payment_xml(xml, 'PREAUTH', amount, options)
         credit_card_xml(xml, credit_card)
       end
 
-      def add_capture(xml, amount, transaction_number)
-        payment_xml(xml, 'CAPTURE', amount)
+      def add_capture(xml, amount, transaction_number, options)
+        payment_xml(xml, 'CAPTURE', amount, options)
         transaction_number_xml(xml, transaction_number)
       end
 
-      def add_refund(xml, amount, transaction_number)
-        payment_xml(xml, 'REFUND', amount)
+      def add_refund(xml, amount, transaction_number, options)
+        payment_xml(xml, 'REFUND', amount, options)
         transaction_number_xml(xml, transaction_number)
       end
 
-      def add_void(xml, amount, transaction_number)
-        payment_xml(xml, 'REVERSAL', amount)
+      def add_void(xml, amount, transaction_number, options)
+        payment_xml(xml, 'REVERSAL', amount, options)
         transaction_number_xml(xml, transaction_number)
       end
 
-      def payment_xml(xml, payment_type, amount)
+      def payment_xml(xml, payment_type, amount, options)
         xml.send('PaymentType', payment_type)
         xml.send('TxnType', 'WEB_SHOP')
-        xml.send('BillerCode', @options.fetch(:biller_code, ''))
+        xml.send('BillerCode', options.fetch(:biller_code, ''))
         xml.send('MerchantReference', '')
         xml.send('CRN1', '')
         xml.send('CRN2', '')
@@ -193,9 +193,9 @@ module ActiveMerchant #:nodoc:
       end
 
       def response_for(xml_doc)
-        if xml_doc.xpath('//ProcessPaymentResult').any?
+        if xml_doc.xpath('//ProcessPaymentResponse').any?
           ProcessPaymentResponse.new(xml_doc, self).to_response
-        elsif xml_doc.xpath('//AddTokenResult').any?
+        elsif xml_doc.xpath('//AddTokenResponse').any?
           AddTokenResponse.new(xml_doc, self).to_response
         end
       end
@@ -210,41 +210,49 @@ module ActiveMerchant #:nodoc:
         end
 
         def to_response
-          Response.new(success?, message, params,
-            authorization: params[:transaction_id],
-            test: gateway.test?,
-            transaction_id: params[:transaction_id]
-          )
+          Response.new(success?, message, params, options)
         end
 
         private
 
         def init_params
-          Hash.new.tap do |h|
-            params_mapping.each do |k,v|
-              h[k] = xml_doc.xpath(v).text
+          {}.tap do |h|
+            xml_doc.xpath(response_node).each do |node|
+              if node.elements.empty?
+                h[node.name.to_sym] = node.text
+              else
+                node.elements.each do |childnode|
+                  name = "#{node.name}_#{childnode.name}"
+                  h[name.to_sym] = childnode.text
+                end
+              end
             end
           end
         end
 
+        def response_node
+          "//#{self.class.name.split('::').last}/*"
+        end
+
+        def options
+          { authorization: params[authorization_key], test: gateway.test? }
+        end
       end
 
       class ProcessPaymentResponse < BPointResponse
 
         private
 
-        def params_mapping
-          { :response_code => '//ProcessPaymentResult/ResponseCode',
-            :authorization_result => '//ProcessPaymentResult/AuthorisationResult',
-            :transaction_id => '//ProcessPaymentResult/TransactionNumber' }
+        def authorization_key
+          :ProcessPaymentResult_TransactionNumber
         end
 
         def success?
-          params[:response_code] == '0'
+          params[:ProcessPaymentResult_ResponseCode] == '0'
         end
 
         def message
-          params[:authorization_result]
+          params[:ProcessPaymentResult_AuthorisationResult]
         end
       end
 
@@ -252,18 +260,16 @@ module ActiveMerchant #:nodoc:
 
         private
 
-        def params_mapping
-          { :response_code => '//response/ResponseCode',
-            :authorization => '//AddTokenResult/Token',
-            :transaction_id => '//AddTokenResult/Token' }
+        def authorization_key
+          :AddTokenResult_Token
         end
 
         def success?
-          params[:response_code] == 'SUCCESS'
+          params[:response_ResponseCode] == 'SUCCESS'
         end
 
         def message
-          params[:response_code].capitalize
+          params[:response_ResponseCode].capitalize
         end
       end
     end
