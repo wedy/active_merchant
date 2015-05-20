@@ -635,7 +635,7 @@ class StripeTest < Test::Unit::TestCase
     end.respond_with(successful_purchase_response)
   end
 
-  def test_contactless_flag_is_not_included_with_emv_card_data
+  def test_contactless_flag_is_not_included_with_emv_card_data_by_default
     stub_comms(@gateway, :ssl_request) do
       @gateway.purchase(@amount, @emv_credit_card, @options)
     end.check_request do |method, endpoint, data, headers|
