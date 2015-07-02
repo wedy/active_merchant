@@ -138,6 +138,17 @@ module ActiveMerchant #:nodoc:
         end
       end
 
+      def add_three_ds_request(xml, tag, three_ds)
+        return if three_ds.nil?
+        xml.tag! tag do
+          xml.tag! 'AuthenticationId', three_ds[:mpi_vendor_3ds]
+          xml.tag! 'Status', three_ds[:auth_status_3ds]
+          xml.tag! 'CAVV', three_ds[:cavv]
+          xml.tag! 'ECI', three_ds[:eci_3ds]
+          xml.tag! 'XID', three_ds[:xid]
+        end
+      end
+
       def parse(data)
         response = {}
         xml = Nokogiri::XML(data)

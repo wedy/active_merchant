@@ -15,7 +15,6 @@ module ActiveMerchant #:nodoc:
 
       def authorize(money, credit_card_or_reference, options = {})
         request = build_sale_or_authorization_request(:authorization, money, credit_card_or_reference, options)
-
         commit(request, options)
       end
 
@@ -155,7 +154,7 @@ module ActiveMerchant #:nodoc:
             end
 
             xml.tag! 'Tender' do
-              add_credit_card(xml, credit_card)
+              add_credit_card(xml, credit_card, options)
             end
           end
         end
@@ -187,7 +186,7 @@ module ActiveMerchant #:nodoc:
         xml.target!
       end
 
-      def add_credit_card(xml, credit_card)
+      def add_credit_card(xml, credit_card, options = {})
         xml.tag! 'Card' do
           xml.tag! 'CardType', credit_card_type(credit_card)
           xml.tag! 'CardNum', credit_card.number
@@ -200,6 +199,8 @@ module ActiveMerchant #:nodoc:
             xml.tag!('ExtData', 'Name' => 'CardIssue', 'Value' => format(credit_card.issue_number, :two_digits)) unless credit_card.issue_number.blank?
           end
           xml.tag! 'ExtData', 'Name' => 'LASTNAME', 'Value' =>  credit_card.last_name
+
+          add_three_ds_request(xml, 'BuyerAuthResult', options[:three_ds]) if options[:three_ds]
         end
       end
 

@@ -28,6 +28,24 @@ class PayflowTest < Test::Unit::TestCase
     refute response.fraud_review?
   end
 
+  def test_successful_authorization_with_3d_secure
+    options_with_3ds = { billing_address: address.merge(first_name: "Longbob", last_name: "Longsen"),
+                         three_ds: { mpi_vendor_3ds: 'CTEremezUA7PkaDwP0Qk',
+                                     auth_status_3ds: 'Y',
+                                     cavv: 'BwAQAJVyYAQECQJTMnJgAAAAAAA=',
+                                     xid: '8abmK0K1Sf9OujrESKKrKkJCP4I=<'
+                                   }
+                        }
+
+    @gateway.stubs(:ssl_post).returns(successful_authorization_response)
+
+    assert response = @gateway.authorize(@amount, @credit_card, options_with_3ds)
+    assert_equal "Approved", response.message
+    assert_success response
+    assert response.test?
+    assert_equal "VUJN1A6E11D9", response.authorization
+  end
+
   def test_failed_authorization
     @gateway.stubs(:ssl_post).returns(failed_authorization_response)
 
@@ -311,6 +329,38 @@ class PayflowTest < Test::Unit::TestCase
   def test_recurring_profile_payment_history_inquiry_contains_the_proper_xml
     request = @gateway.send( :build_recurring_request, :inquiry, nil, :profile_id => 'RT0000000009', :history => true)
     assert_match %r(<PaymentHistory>Y</PaymentHistory), request
+  end
+
+  def test_format_3d_secure
+    xml = Builder::XmlMarkup.new
+    options_with_3ds = { three_ds: { mpi_vendor_3ds: 'CTEremezUA7PkaDwP0Qk',
+                                     auth_status_eds: 'Y',
+                                     cavv: '>BwAQAJVyYAQECQJTMnJgAAAAAAA=',
+                                     eci_3ds: '5',
+                                     xid: '8abmK0K1Sf9OujrESKKrKkJCP4I=' } }
+
+    @gateway.send(:add_credit_card, xml, credit_card, options_with_3ds)
+    doc = REXML::Document.new(xml.target!)
+
+    # Authentication ID
+    node = REXML::XPath.first(doc, '/Card/BuyerAuthResult/AuthenticationId')
+    assert_equal options_with_3ds[:three_ds][:mpi_vendor_3ds], node.text
+
+    # Status
+    node = REXML::XPath.first(doc, '/Card/BuyerAuthResult/Status')
+    assert_equal options_with_3ds[:three_ds][:auth_status_3ds], node.text
+
+    # CAVV
+    node = REXML::XPath.first(doc, '/Card/BuyerAuthResult/CAVV')
+    assert_equal options_with_3ds[:three_ds][:cavv], node.text
+
+    # ECI
+    node = REXML::XPath.first(doc, '/Card/BuyerAuthResult/ECI')
+    assert_equal options_with_3ds[:three_ds][:eci_3ds], node.text
+
+    # XID
+    node = REXML::XPath.first(doc, '/Card/BuyerAuthResult/XID')
+    assert_equal options_with_3ds[:three_ds][:xid], node.text
   end
 
   def test_format_issue_number
